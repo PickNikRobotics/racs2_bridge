@@ -2,6 +2,7 @@
 **   Include Files:
 */
 
+#include "common_types.h"
 #include "racs2_bridge_client.h"
 #include "racs2_bridge_client_perfids.h"
 #include "racs2_bridge_client_msgids.h"
@@ -11,6 +12,7 @@
 #include "racs2_bridge_client_events.h"
 #include "racs2_bridge_client_version.h"
 #include <pthread.h>
+#include <stdint.h>
 
 /*
 ** global data
@@ -53,7 +55,7 @@ enum protocols
 #define RACS2_BRIDGE_HEADER_LENGTH 32
 #define RACS2_BRIDGE_DEST_MSGID_NUM 16
 uint8_t registerd_msgid_num = 0;
-uint16 dest_message_id_list[RACS2_BRIDGE_DEST_MSGID_NUM] = {0};
+uint16_t dest_message_id_list[RACS2_BRIDGE_DEST_MSGID_NUM] = {0};
 
 static int callback_example( struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len )
 {
@@ -70,15 +72,9 @@ static int callback_example( struct lws *wsi, enum lws_callback_reasons reason, 
         case LWS_CALLBACK_CLIENT_RECEIVE:
             lwsl_user( "case LWS_CALLBACK_CLIENT_RECEIVE: \n" ) ;
             lwsl_user( "[Recv]: %s\n", (char*)in ) ;
-            lwsl_user( "[Recv]: data len = %d\n", len ) ;
+            lwsl_user( "[Recv]: data len = %lu\n", len ) ;
 
             // === send message =========================
-            char *hello = "Hello";
-            if (!strncmp((char*)in, hello, 1))
-            {
-                // OS_printf("[Recv]: %s\n", (char*)in);
-                break;
-            }
             // Get message ID from header
             uint16_t id_seg1 = ((uint8_t*)in)[0];
             uint16_t id_seg2 = ((uint8_t*)in)[1];
@@ -98,7 +94,7 @@ static int callback_example( struct lws *wsi, enum lws_callback_reasons reason, 
             memcpy(RACS2_UserMsgPkt.body_data, (uint8_t*)in + RACS2_BRIDGE_HEADER_LENGTH, body_data_length);
             // Send message
             CFE_SB_TimeStampMsg((CFE_SB_Msg_t *) &RACS2_UserMsgPkt);
-            int32 status = CFE_SB_SendMsg((CFE_SB_Msg_t *) &RACS2_UserMsgPkt);
+            int32_t status = CFE_SB_SendMsg((CFE_SB_Msg_t *) &RACS2_UserMsgPkt);
             // OS_printf("RACS2_BRIDGE_CLIENT: Sent message, MID = [0x%x], sample_command_count = %d\n",
             //     CFE_SB_GetMsgId((CFE_SB_MsgPtr_t) &RACS2_UserMsgPkt),
             //     RACS2_UserMsgPkt.sample_command_count
@@ -117,13 +113,11 @@ static int callback_example( struct lws *wsi, enum lws_callback_reasons reason, 
         {
             lwsl_user( "case LWS_CALLBACK_CLIENT_WRITEABLE: \n" ) ;
 
+           pthread_mutex_lock(&g_bridge_msg_flag_mutex);
            if (g_is_bridge_msg_sent)
             {
-                pthread_mutex_lock(&g_bridge_msg_flag_mutex);
                 lws_write( wsi, g_bridge_msg_pkt, BRIDGE_HEADER_LNGTH+BODY_DATA_MAX_LNGTH, LWS_WRITE_BINARY );
-                pthread_mutex_unlock(&g_bridge_msg_flag_mutex);
             }
-            pthread_mutex_lock(&g_bridge_msg_flag_mutex);
             g_is_bridge_msg_sent = 0;
             pthread_mutex_unlock(&g_bridge_msg_flag_mutex);
             break;
@@ -360,7 +354,6 @@ void RACS2_BRIDGE_CLIENT_ProcessCommandPacket(void)
             OS_printf("RACS2_BRIDGE_CLIENT: ros2_topic_name = %s\n", tmp_ptr->ros2_topic_name);
             OS_printf("RACS2_BRIDGE_CLIENT: body_data_length = %d\n", tmp_ptr->body_data_length);
 
-            pthread_mutex_lock(&g_bridge_msg_pkt_mutex);
             pthread_mutex_lock(&g_bridge_msg_flag_mutex);
             memset(&g_bridge_msg_pkt, 0, ROS2_TOPIC_NAME_LNGTH+BODY_DATA_MAX_LNGTH);
             // set topic name data
@@ -368,7 +361,6 @@ void RACS2_BRIDGE_CLIENT_ProcessCommandPacket(void)
             // set body data
             memcpy(&g_bridge_msg_pkt[BRIDGE_HEADER_LNGTH], (uint8_t*)&tmp_ptr->body_data, tmp_ptr->body_data_length);
             g_is_bridge_msg_sent = 1;
-            pthread_mutex_unlock(&g_bridge_msg_pkt_mutex);
             pthread_mutex_unlock(&g_bridge_msg_flag_mutex);
 
             break;
