@@ -7,6 +7,7 @@
 #include "event_talker_msgids.h"
 #include "event_talker_msg.h"
 #include "racs2_user_msg.h"
+#include "racs2_bridge_client_msgids.h"
 #include "event_talker_events.h"
 #include "event_talker_version.h"
 #include "RACS2Brdige_std_msgs.pb-c.h"
