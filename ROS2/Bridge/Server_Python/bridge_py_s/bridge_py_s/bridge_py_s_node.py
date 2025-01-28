@@ -5,9 +5,11 @@ import rclpy
 from rclpy.node import Node
 import asyncio
 import websockets
+import logging
 
 from racs2_msg.msg import RACS2UserMsg
 
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------------------
 gNode = None
@@ -23,8 +25,8 @@ class _BridgePyS(Node):
 
         self.wss_uri = self.get_parameter("wss_uri").value
         self.wss_port = self.get_parameter("wss_port").value
-        print("Parameter(wss_uri) : " + self.wss_uri)
-        print("Parameter(wss_port) : " + str(self.wss_port))
+        self.get_logger().info("Parameter(wss_uri) : " + self.wss_uri)
+        self.get_logger().info("Parameter(wss_port) : " + str(self.wss_port))
 
         # Subscription
         self.subscription = self.create_subscription(
@@ -52,24 +54,20 @@ class _BridgePyS(Node):
             try:
                 await wss_send(gWebSocket, msg)
             except Exception as e:
-                print(str(e))
+                self.get_logger().info(str(e))
                 gWebSocket = None
 
     def do_publish(self, topic_name, aMessage):
         if not topic_name in self.publisher_info:
-            print(f"Publisher for topic[{topic_name}] does not exit")
+            self.get_logger().info(f"Publisher for topic[{topic_name}] does not exit")
             return
         self.publisher_info[topic_name].publish(aMessage)
 
     def register_publisher(self, topic_name):
-        if len(self.publisher_info) == 0:
+        if not topic_name in self.publisher_info:
             self.publisher_info[topic_name] = self.create_publisher(
                 RACS2UserMsg, topic_name, 10)
-            print(f"Create publisher for topic[{topic_name}]")
-        else:
-            if not topic_name in self.publisher_info:
-                self.publisher_info[topic_name] = self.create_publisher(
-                    RACS2UserMsg, topic_name, 10)
+        self.get_logger().info(f"Create publisher for topic[{topic_name}]")
 
 
 async def spin_once(aNode):
@@ -87,36 +85,39 @@ gWebSocket = None
 
 
 async def wss_send(websocket, message):
-    print('[RACS2 Bridge] wss_send')
+    logger.info('[RACS2 Bridge] wss_send')
     await websocket.send(message)
 
 
 async def wss_recv():
     global gWebSocket
     if (gWebSocket is None):
-        print("WebSocket is error.")
+        logger.error("WebSocket is error.")
         return
     websocket = gWebSocket
     while True:
         try:
             recv_message = await websocket.recv()
-            print(f'WssRecv: {recv_message}')
+            logger.info(f'WssRecv: {recv_message}')
             topic_name = recv_message[0:32].decode()
-            print(f"topic name = {topic_name}")
+            logger.info(f"topic name = {topic_name}")
+
+            if gNode is None:
+                logger.warning("[RACS2 Bridge] Node is not initialized yet, skipping message")
+                continue
             gNode.register_publisher(topic_name)
             publish_message = RACS2UserMsg()
             publish_message.body_data_length = len(recv_message) - 32
             bytes_list = [bytes([elem]) for elem in recv_message[32:]]
             publish_message.body_data = bytes_list
-            if gNode is not None:
-                gNode.do_publish(topic_name, publish_message)
+            gNode.do_publish(topic_name, publish_message)
         except websockets.ConnectionClosedOK:
-            print("Error: websockets")
+            logger.error("Error: websockets")
             break
 
 
 async def wss_accept(websocket, path):
-    print('[RACS2 Bridge] wss_accept | path: %s' % path)
+    logger.info('[RACS2 Bridge] wss_accept | path: %s' % path)
     global gWebSocket
     gWebSocket = websocket
 
@@ -128,14 +129,14 @@ async def wss_accept(websocket, path):
 
 
 async def wss_run(aNode):
-    print('[RACS2 Bridge] wss_run')
+    logger.info('[RACS2 Bridge] wss_run')
     async with websockets.serve(wss_accept, aNode.wss_uri, aNode.wss_port):
         await asyncio.Future()
 
 
 # ----------------------------------------------------------
 def main(args=None):
-    print('[RACS2 Bridge] bridge_py_s - main')
+    logger.info('[RACS2 Bridge] bridge_py_s - main')
     rclpy.init(args=args)
 
     bridge_py_s = _BridgePyS()
