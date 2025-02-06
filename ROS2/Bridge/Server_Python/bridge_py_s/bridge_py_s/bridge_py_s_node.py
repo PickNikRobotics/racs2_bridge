@@ -5,15 +5,13 @@ import rclpy
 from rclpy.node import Node
 import asyncio
 import websockets
-import logging
 
 from racs2_msg.msg import RACS2UserMsg
-
-logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------------------
 gNode = None
 
+logger = rclpy.logging.get_logger("RACS2Bridge")
 
 class _BridgePyS(Node):
 
@@ -67,6 +65,7 @@ class _BridgePyS(Node):
         if not topic_name in self.publisher_info:
             self.publisher_info[topic_name] = self.create_publisher(
                 RACS2UserMsg, topic_name, 10)
+            return
         self.get_logger().info(f"Create publisher for topic[{topic_name}]")
 
 
@@ -85,25 +84,25 @@ gWebSocket = None
 
 
 async def wss_send(websocket, message):
-    logger.info('[RACS2 Bridge] wss_send')
+    logger.info('wss_send')
     await websocket.send(message)
 
 
-async def wss_recv():
+async def wss_recv(websocket):
     global gWebSocket
+    gWebSocket = websocket
+
     if (gWebSocket is None):
         logger.error("WebSocket is error.")
         return
-    websocket = gWebSocket
-    while True:
-        try:
-            recv_message = await websocket.recv()
+    try:
+        async for recv_message in websocket:
             logger.info(f'WssRecv: {recv_message}')
             topic_name = recv_message[0:32].decode()
             logger.info(f"topic name = {topic_name}")
 
             if gNode is None:
-                logger.warning("[RACS2 Bridge] Node is not initialized yet, skipping message")
+                logger.warning("Node is not initialized yet, skipping message")
                 continue
             gNode.register_publisher(topic_name)
             publish_message = RACS2UserMsg()
@@ -111,32 +110,21 @@ async def wss_recv():
             bytes_list = [bytes([elem]) for elem in recv_message[32:]]
             publish_message.body_data = bytes_list
             gNode.do_publish(topic_name, publish_message)
-        except websockets.ConnectionClosedOK:
-            logger.error("Error: websockets")
-            break
-
-
-async def wss_accept(websocket, path):
-    logger.info('[RACS2 Bridge] wss_accept | path: %s' % path)
-    global gWebSocket
-    gWebSocket = websocket
-
-    async for message in websocket:
-        print('Recv: %s' % message)
-        # for confirmation
-        # await websocket.send( "server accepted.")
-        await wss_recv()
+    except websockets.ConnectionClosedOK:
+        logger.warning("Websocket closed properly.")
+    except websockets.ConnectionClosedError as e:
+        logger.error(f"Websocket closed with error: %s" % e)
 
 
 async def wss_run(aNode):
-    logger.info('[RACS2 Bridge] wss_run')
-    async with websockets.serve(wss_accept, aNode.wss_uri, aNode.wss_port):
+    logger.info('wss_run')
+    async with websockets.serve(wss_recv, aNode.wss_uri, aNode.wss_port):
         await asyncio.Future()
 
 
 # ----------------------------------------------------------
 def main(args=None):
-    logger.info('[RACS2 Bridge] bridge_py_s - main')
+    logger.info('bridge_py_s - main')
     rclpy.init(args=args)
 
     bridge_py_s = _BridgePyS()
